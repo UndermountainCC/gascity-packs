@@ -1,0 +1,13 @@
+# Chat worktree — one git worktree per interactive chat session.
+#
+# Adds a single rig-scoped agent, `chat`. Every session of it opens in its own
+# git worktree of the rig, <rig>/worktrees/chat-<name>, on branch
+# gc-chat-<name>, so concurrent conversations never share the rig checkout.
+#
+# Import it at rig scope (rigs[].pack). Sessions are opened on demand; the pack
+# declares no services and no named sessions. See README.md.
+
+[pack]
+name = "chat-worktree"
+schema = 2
+description = "Rig-scoped chat agent whose sessions each open in their own git worktree"

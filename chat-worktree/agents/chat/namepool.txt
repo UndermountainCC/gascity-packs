@@ -1,0 +1,17 @@
+# Pool slot names, used only for reconciler-allocated slots; gc session new names sessions chat-adhoc-<hex> or by --alias.
+alder
+aspen
+birch
+cedar
+elm
+fir
+hazel
+juniper
+larch
+maple
+oak
+pine
+rowan
+spruce
+willow
+yew

@@ -1,0 +1,101 @@
+"""Static layout checks for the chat-worktree pack (REQ-001, REQ-002, REQ-010)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import re
+import tomllib
+
+
+PACK = Path(__file__).resolve().parents[1]
+AGENT_DIR = PACK / "agents" / "chat"
+
+EXPECTED_AGENT = {
+    "scope": "rig",
+    "wake_mode": "fresh",
+    "work_dir": "{{.RigRoot}}/worktrees/chat-{{.AgentBase}}",
+    "pre_start": [
+        "{{.ConfigDir}}/assets/scripts/worktree-chat.sh"
+        " {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"
+    ],
+    "min_active_sessions": 0,
+    "max_active_sessions": 8,
+}
+
+# Keys the agent may carry beyond EXPECTED_AGENT. `provider` is deliberately
+# absent: the agent inherits the city or rig default (OQ-2).
+OPTIONAL_AGENT_KEYS = {"description", "idle_timeout"}
+
+NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+
+# Built by concatenation so this file does not match its own scan.
+FORBIDDEN_NEEDLES = ("re" + "matu", "ses" + "ión", "char" + "la")
+
+
+def load_toml(path: Path) -> dict:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def load_agent() -> dict:
+    return load_toml(AGENT_DIR / "agent.toml")
+
+
+def namepool_names() -> list[str]:
+    lines = (AGENT_DIR / "namepool.txt").read_text(encoding="utf-8").splitlines()
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+
+def test_pack_manifest_is_standalone():
+    manifest = load_toml(PACK / "pack.toml")
+    assert manifest["pack"]["name"] == "chat-worktree"
+    assert manifest["pack"]["schema"] == 2
+    assert "imports" not in manifest
+    assert "service" not in manifest
+    assert "named_session" not in manifest
+
+
+def test_agent_has_exactly_the_required_values():
+    agent = load_agent()
+    for key, value in EXPECTED_AGENT.items():
+        assert agent.get(key) == value, key
+    assert "provider" not in agent
+    assert set(agent) - set(EXPECTED_AGENT) <= OPTIONAL_AGENT_KEYS
+
+
+def test_namepool_names_are_unique_branch_safe_and_sufficient():
+    names = namepool_names()
+    assert len(names) == len(set(names))
+    for name in names:
+        assert NAME_PATTERN.match(name), name
+    assert len(names) >= load_agent()["max_active_sessions"]
+
+
+def test_namepool_comment_explains_pool_slot_scope():
+    first = (AGENT_DIR / "namepool.txt").read_text(encoding="utf-8").splitlines()[0]
+    assert first.startswith("#")
+    assert "chat-adhoc-" in first
+    assert "--alias" in first
+
+
+def test_prompt_names_worktree_branch_and_prohibitions():
+    prompt = (AGENT_DIR / "prompt.template.md").read_text(encoding="utf-8")
+    assert "{{ .WorkDir }}" in prompt
+    assert "gc-chat-" in prompt
+    assert "{{ .RigRoot }}" in prompt
+    lowered = prompt.lower()
+    assert "never merge" in lowered
+    assert "never push to the default branch" in lowered
+
+
+def test_pack_has_no_project_specific_text():
+    for path in sorted(PACK.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace").lower()
+        for needle in FORBIDDEN_NEEDLES:
+            assert needle not in text, f"{path.relative_to(PACK)} contains {needle!r}"
+
+
+def test_no_top_level_scripts_directory():
+    assert not (PACK / "scripts").exists()
