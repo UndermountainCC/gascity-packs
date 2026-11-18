@@ -276,6 +276,33 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                     expected["implementation_item_formula"],
                 )
 
+    def test_build_and_implementation_entrypoints_inherit_graph_input_lifecycle(
+        self,
+    ) -> None:
+        # Every pack-local formula, expansions included, is resolved across the
+        # layered dirs; one that cannot be resolved fails the test. Only the
+        # build and implementation entrypoints may resolve to graph: drain item
+        # formulas compile separately and keep the external default.
+        for pack_name, expected in DERIVED_PACKS.items():
+            formula_dirs = pack_formula_dirs(pack_name)
+            graph = set()
+            for path in sorted((PACKS_ROOT / pack_name / "formulas").glob("*.formula.toml")):
+                formula_name = path.name.removesuffix(".formula.toml")
+                resolved = base_contract.resolve_formula_from_dirs(
+                    formula_dirs, formula_name
+                )
+                if resolved.get("input_lifecycle") == "graph":
+                    graph.add(formula_name)
+                    with self.subTest(pack=pack_name, guarded=formula_name):
+                        self.assertIn(
+                            ">=2.1.0", resolved["formula_compiler_constraints"]
+                        )
+            with self.subTest(pack=pack_name):
+                self.assertEqual(
+                    graph,
+                    {expected["formula"], expected["implementation_entry_formula"]},
+                )
+
     def test_route_targets_resolve_to_providerless_agents(self) -> None:
         for pack_name in DERIVED_PACKS:
             pack_root = PACKS_ROOT / pack_name

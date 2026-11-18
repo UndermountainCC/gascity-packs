@@ -23,6 +23,11 @@ for every derived pack.
   `implement`, `implement-same-session`, `review`, `finalize`, and `publish`
   under their base ids in the base sequence; `prepare` remains inherited. No
   base anchor is renamed, skipped, or reordered.
+- Input lifecycle: `gstack-build` and `gstack-implementation` inherit
+  `input_lifecycle = "graph"` and the `formula_compiler >= 2.1.0` requirement
+  from `build-base` and `implement` (`GC-METH-017`). The pack declares neither
+  itself, and its drain item formulas `gstack-work` and `gstack-work-item` keep
+  the external default.
 - QA and release-readiness anchors: `qa` and `release-readiness` are the only
   pack-added steps in `gstack-build`, and they stay anchored after `review`
   and before `finalize`. The declared insertion points are `qa` after the

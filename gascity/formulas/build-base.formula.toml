@@ -28,8 +28,12 @@ Launch inputs:
 formula = "build-base"
 version = 1
 contract = "graph.v2"
+input_lifecycle = "graph"
 target_required = true
 internal = true
+
+[requires]
+formula_compiler = ">=2.1.0"
 
 [metadata.gc.methodology]
 allowed_drain_policies = ["separate", "same-session"]

@@ -24,6 +24,12 @@ for every derived pack.
   base ids in the base sequence; `prepare` and `publish` remain inherited.
   `superpowers-build` adds no top-level stage of its own, and no base anchor
   is renamed, skipped, or reordered.
+- Input lifecycle: `superpowers-build` and `superpowers-implementation`
+  inherit `input_lifecycle = "graph"` and the `formula_compiler >= 2.1.0`
+  requirement from `build-base` and `implement` (`GC-METH-017`). The pack
+  declares neither itself, and its drain item formulas
+  `superpowers-development` and `superpowers-development-item` keep the
+  external default.
 - Pack-added structure: the only pack-added steps live inside the item
   formulas, not the build anchor sequence. `superpowers-development` (extends
   `do-work`) and `superpowers-development-item` (extends `do-work-item`)

@@ -17,8 +17,12 @@ Launch inputs:
 formula = "implement"
 version = 2
 contract = "graph.v2"
+input_lifecycle = "graph"
 target_required = true
 sling_container_mode = "source"
+
+[requires]
+formula_compiler = ">=2.1.0"
 
 [catalog]
 name = "implement"
