@@ -152,8 +152,8 @@ Browse the tree for the current set; each pack has its own README.
 
 ### Session packs
 
-- [chat-worktree](./chat-worktree) gives each rig chat session its own git
-  worktree and `gc-chat-<name>` branch.
+- [agent-worktree](./agent-worktree) lets a rig opt any agent into its own
+  stable git worktree, and gives each rig chat session its own worktree.
 
 ### Oversight packs
 
