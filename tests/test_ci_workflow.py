@@ -125,6 +125,18 @@ def test_runtime_herdr_core_is_in_the_lint_loop() -> None:
     assert "runtime-herdr-core" in packs, f"gc lint loop: {packs}"
 
 
+def test_agent_worktree_is_tested_and_linted_in_ci() -> None:
+    workflow = yaml.safe_load(
+        REPO_ROOT.joinpath(".github", "workflows", "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = {step.get("name"): step for step in workflow["jobs"]["check"]["steps"]}
+    shared = steps["Run Python pack tests"]["run"].split()
+    assert "agent-worktree/tests" in shared, "the shared pytest step must run agent-worktree"
+    loop = steps["Lint and exercise shared role prompt composition"]["run"]
+    packs = loop.split("for pack in", 1)[1].split("; do", 1)[0].replace("\\", " ").split()
+    assert "agent-worktree" in packs, f"gc lint loop: {packs}"
+
+
 
 def test_runtime_herdr_core_guards_infrastructure_argv_drift_at_the_conformance_pin() -> None:
     workflow = yaml.safe_load(

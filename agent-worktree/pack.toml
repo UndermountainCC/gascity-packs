@@ -1,0 +1,20 @@
+# Agent worktree — opt any agent of a rig into its own stable git worktree.
+#
+# Every opted-in session opens in its own git worktree of the rig, under
+# <rig>/worktrees/, on its own gc-* branch, so it never shares the rig
+# checkout. The pack has two uses, through two independent imports:
+#
+# - City import ([imports.<binding>]): provides the `gc <binding> ensure`
+#   command and the opt-in patches for named agents. A city import is
+#   required for this, because rig imports expose no pack commands. Set
+#   agents_exclude = ["chat"] unless you also want `chat` in every rig.
+# - Rig import ([rigs.imports.<binding>]): adds the rig-scoped `chat` agent,
+#   whose every session opens in its own worktree, chat-<name>.
+#
+# Sessions are opened on demand; the pack declares no services and no named
+# sessions. See README.md.
+
+[pack]
+name = "agent-worktree"
+schema = 2
+description = "Opt any agent of a rig into its own stable git worktree; includes a per-session chat agent"
