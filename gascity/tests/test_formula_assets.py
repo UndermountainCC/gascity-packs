@@ -521,13 +521,38 @@ def merged_steps(parent_steps: list[dict], child_steps: list[dict]) -> list[dict
     return result
 
 
+def own_formula_compiler_constraints(data: dict) -> list[str]:
+    raw = str((data.get("requires") or {}).get("formula_compiler", "")).strip()
+    return [raw] if raw else []
+
+
+def merge_input_policy(merged: dict, data: dict, resolved_parents: list[dict]) -> None:
+    """Resolve input_lifecycle and collect declared compiler constraints.
+
+    The child's own input_lifecycle wins, otherwise the first parent in extends
+    order with a non-empty resolved value. formula_compiler_constraints lists
+    every explicitly declared [requires] formula_compiler across the chain; it
+    does not model the implicit ">=2.0.0" from contract = "graph.v2" or detect
+    conflicting constraints.
+    """
+    lifecycle = data.get("input_lifecycle", "")
+    constraints = own_formula_compiler_constraints(data)
+    for parent_data in resolved_parents:
+        if not lifecycle:
+            lifecycle = parent_data.get("input_lifecycle", "")
+        constraints.extend(parent_data.get("formula_compiler_constraints", []))
+    if lifecycle:
+        merged["input_lifecycle"] = lifecycle
+    merged["formula_compiler_constraints"] = constraints
+
+
 def resolve_formula(root: pathlib.Path, name: str, seen: tuple[str, ...] = ()) -> dict:
     if name in seen:
         raise AssertionError(f"circular formula extends: {' -> '.join((*seen, name))}")
     data = load_formula(root, name)
     parents = data.get("extends", [])
     if not parents:
-        return data
+        return {**data, "formula_compiler_constraints": own_formula_compiler_constraints(data)}
 
     merged: dict = {
         "formula": data["formula"],
@@ -538,8 +563,10 @@ def resolve_formula(root: pathlib.Path, name: str, seen: tuple[str, ...] = ()) -
         "vars": {},
         "steps": [],
     }
+    resolved_parents = []
     for parent in parents:
         parent_data = resolve_formula(root, parent, (*seen, name))
+        resolved_parents.append(parent_data)
         if not merged["contract"]:
             merged["contract"] = parent_data.get("contract", "")
         if merged["target_required"] is None:
@@ -551,6 +578,7 @@ def resolve_formula(root: pathlib.Path, name: str, seen: tuple[str, ...] = ()) -
     merged["steps"] = merged_steps(merged["steps"], data.get("steps", []))
     if data.get("description"):
         merged["description"] = data["description"]
+    merge_input_policy(merged, data, resolved_parents)
     return merged
 
 
@@ -560,7 +588,7 @@ def resolve_formula_from_dirs(formula_dirs: list[pathlib.Path], name: str, seen:
     data = load_formula_from_dirs(formula_dirs, name)
     parents = data.get("extends", [])
     if not parents:
-        return data
+        return {**data, "formula_compiler_constraints": own_formula_compiler_constraints(data)}
 
     merged: dict = {
         "formula": data["formula"],
@@ -571,8 +599,10 @@ def resolve_formula_from_dirs(formula_dirs: list[pathlib.Path], name: str, seen:
         "vars": {},
         "steps": [],
     }
+    resolved_parents = []
     for parent in parents:
         parent_data = resolve_formula_from_dirs(formula_dirs, parent, (*seen, name))
+        resolved_parents.append(parent_data)
         if not merged["contract"]:
             merged["contract"] = parent_data.get("contract", "")
         if merged["target_required"] is None:
@@ -584,6 +614,7 @@ def resolve_formula_from_dirs(formula_dirs: list[pathlib.Path], name: str, seen:
     merged["steps"] = merged_steps(merged["steps"], data.get("steps", []))
     if data.get("description"):
         merged["description"] = data["description"]
+    merge_input_policy(merged, data, resolved_parents)
     return merged
 
 
@@ -1951,6 +1982,76 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual(steps["repair-review"]["needs"], ["review"])
         self.assertEqual(steps["finalize"]["needs"], ["repair-review"])
         self.assertEqual(steps["publish"]["needs"], ["finalize"])
+
+    def test_resolver_input_policy_mirrors_core_extends_rules(self) -> None:
+        fixtures = {
+            "plain": "",
+            "graph-parent": 'input_lifecycle = "graph"\n[requires]\nformula_compiler = ">=2.1.0"\n',
+            "external-parent": 'input_lifecycle = "external"\n[requires]\nformula_compiler = ">=2.0.0"\n',
+            "first-declaring-wins": 'extends = ["plain", "graph-parent", "external-parent"]\n',
+            "own-wins": 'input_lifecycle = "external"\nextends = ["graph-parent"]\n',
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            formula_dir = pathlib.Path(tmp) / "formulas"
+            formula_dir.mkdir()
+            for name, body in fixtures.items():
+                (formula_dir / f"{name}.formula.toml").write_text(f'formula = "{name}"\n{body}', encoding="utf-8")
+            root = pathlib.Path(tmp)
+
+            first = resolve_formula(root, "first-declaring-wins")
+            self.assertEqual(first["input_lifecycle"], "graph")
+            self.assertEqual(sorted(first["formula_compiler_constraints"]), [">=2.0.0", ">=2.1.0"])
+            self.assertEqual(resolve_formula_from_dirs([formula_dir], "first-declaring-wins"), first)
+
+            own = resolve_formula(root, "own-wins")
+            self.assertEqual(own["input_lifecycle"], "external")
+            self.assertEqual(own["formula_compiler_constraints"], [">=2.1.0"])
+
+            plain = resolve_formula(root, "plain")
+            self.assertNotIn("input_lifecycle", plain)
+            self.assertEqual(plain["formula_compiler_constraints"], [])
+
+    def test_self_settling_build_workflows_declare_graph_input_lifecycle(self) -> None:
+        # These workflows close their own input convoy members during
+        # implementation; under the default external policy the next claim would
+        # retire the workflow and skip review, finalize and publish.
+        root = pathlib.Path(__file__).resolve().parents[1]
+        for formula in ("build-base", "implement", "build-from-convoy-base"):
+            with self.subTest(declares=formula):
+                data = load_formula(root, formula)
+                self.assertEqual(data.get("input_lifecycle"), "graph")
+                self.assertEqual(data.get("requires"), {"formula_compiler": ">=2.1.0"})
+
+        # Every formula in the pack, expansions included, is resolved; one that
+        # cannot be resolved fails the test rather than being skipped. Anything
+        # outside this set keeps the external default, including
+        # build-from-review*, do-work*, and same-session-implement.
+        graph = set()
+        for path in sorted((root / "formulas").glob("*.formula.toml")):
+            name = path.name.removesuffix(".formula.toml")
+            resolved = resolve_formula(root, name)
+            if resolved.get("input_lifecycle") == "graph":
+                graph.add(name)
+                # Without the compiler floor an older gc would not apply the
+                # policy, so every graph formula must carry it in its chain.
+                with self.subTest(guarded=name):
+                    self.assertIn(">=2.1.0", resolved["formula_compiler_constraints"])
+        self.assertEqual(
+            graph,
+            {
+                "build-base",
+                "build-basic",
+                "build-from-convoy-base",
+                "build-from-convoy",
+                "build-from-decompose-base",
+                "build-from-decompose",
+                "build-from-plan-base",
+                "build-from-plan",
+                "build-from-requirements-base",
+                "build-from-requirements",
+                "implement",
+            },
+        )
 
     def test_build_from_review_blocked_results_are_healable_not_passed(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[1]

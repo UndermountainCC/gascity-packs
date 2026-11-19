@@ -174,6 +174,19 @@ the core-injected reserved convoy target; they do not declare `issue`,
 default. Use `same-session` only when preserving one shared worktree and
 conversation is explicitly desired and core shared drain support is available.
 
+`build-base`, `build-from-convoy-base`, and `implement` declare
+`input_lifecycle = "graph"`, and formulas that extend them inherit it. These
+workflows close their own input convoy members during implementation; with this
+policy their later steps, such as review, finalize, and publish, still run
+afterward. Closing or handing off the input therefore no longer retires such a
+run; cancel it explicitly instead. Input proven purged from every store still
+retires it. The formulas require `formula_compiler >= 2.1.0`, and a gc with an
+older compiler refuses to compile them
+(`formula.compiler_requirement_unsatisfied`). Each worker's `gc hook` must also
+understand the policy. An older worker binary ignores it and still retires the
+run once its input is terminal. A copy of one of these three formulas in a
+higher-priority layer must keep both declarations.
+
 The pack ships its city-scoped claim command alongside formulas, plus
 providerless rig role agents under `gascity/roles`. Standalone use requires
 the top-level `gc` import for formulas, mayor skill, and `gc gc claim`, and

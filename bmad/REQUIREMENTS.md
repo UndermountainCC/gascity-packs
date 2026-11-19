@@ -23,6 +23,11 @@ for every derived pack.
   `implement`, `implement-same-session`, and `review` under their base ids in
   the base sequence; `prepare`, `finalize`, and `publish` remain inherited.
   No base anchor is renamed, skipped, or reordered.
+- Input lifecycle: `bmad-build` and `bmad-implementation` inherit
+  `input_lifecycle = "graph"` and the `formula_compiler >= 2.1.0` requirement
+  from `build-base` and `implement` (`GC-METH-017`). The pack declares neither
+  itself, and its drain item formulas `bmad-story-development` and
+  `bmad-story-development-item` keep the external default.
 - Implementation readiness anchor: `implementation-readiness` is the only
   pack-added step in `bmad-build`. Its declared insertion point is after
   `decompose` and before either implementation drain (`needs = ["decompose"]`;

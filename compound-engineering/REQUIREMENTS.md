@@ -23,6 +23,11 @@ for every derived pack.
   `implement-same-session`, `review`, and `finalize` under their base ids in
   the base sequence; `prepare`, `decompose`, and `publish` remain inherited.
   No anchor is renamed, skipped, or reordered.
+- Input lifecycle: `compound-build` and `compound-implementation` inherit
+  `input_lifecycle = "graph"` and the `formula_compiler >= 2.1.0` requirement
+  from `build-base` and `implement` (`GC-METH-017`). The pack declares neither
+  itself, and its drain item formulas `compound-work` and `compound-work-item`
+  keep the external default.
 - Methodology selectors: the pack ships one derived formula per base
   methodology contract, each declared with `extends` on the matching base:
   `compound-planning` (`planning-base`), `compound-decomposition`

@@ -848,6 +848,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-014 | Coverage matrix consistency | YAML coverage is authoritative, markdown coverage mirrors IDs/statuses, and all non-covered statuses include rationale. | this ledger; future schema/gate tests |
 | GC-METH-015 | Neutral artifact metadata | Artifacts record workflow, methodology, and producer metadata without owner or role fields. | this ledger; future schema/gate tests |
 | GC-METH-016 | Nested continuation suffixes | `build-from-requirements-base -> build-from-plan-base -> build-from-decompose-base -> build-from-convoy-base -> build-from-review-base` form a nested suffix chain. Each suffix validates its prerequisite, performs its owned work, and hands off to the next suffix. Cataloged `build-from-*` wrappers expose the default Gas City behavior. | `formulas/build-from-*-base.formula.toml`; `formulas/build-from-*.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `tests/test_formula_assets.py::FormulaAssetTests::test_default_continuation_entrypoints_extend_suffix_bases` |
+| GC-METH-017 | Graph-owned input lifecycle | `build-base`, `build-from-convoy-base`, and `implement` declare `input_lifecycle = "graph"` with `formula_compiler >= 2.1.0`; build and implementation entrypoints extending them, including the derived `*-build` and `*-implementation` formulas, inherit it, while drain item formulas and `build-from-review*` keep the external default. | `formulas/build-base.formula.toml`; `formulas/build-from-convoy-base.formula.toml`; `formulas/implement.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_self_settling_build_workflows_declare_graph_input_lifecycle`; `tests/test_derived_pack_compatibility.py::DerivedPackCompatibilityTests::test_build_and_implementation_entrypoints_inherit_graph_input_lifecycle` |
 
 ## Deferred Follow-Up Requirements
 
@@ -863,6 +864,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 - `gascity/tests/test_formula_assets.py::FormulaAssetTests::test_base_formula_requirements_cover_formula_set`
 - `gascity/tests/test_formula_assets.py::FormulaAssetTests::test_build_base_is_full_lifecycle_virtual_contract`
 - `gascity/tests/test_formula_assets.py::FormulaAssetTests::test_third_party_build_packs_extend_base_and_vendor_sources`
+- `gascity/tests/test_formula_assets.py::FormulaAssetTests::test_self_settling_build_workflows_declare_graph_input_lifecycle`
 - `gascity/tests/test_derived_pack_compatibility.py::DerivedPackCompatibilityTests`
 
 ## Maintenance Rules
