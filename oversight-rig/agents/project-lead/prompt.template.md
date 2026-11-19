@@ -208,6 +208,18 @@ sit unclaimed if no worker session is awake:
 gc bd --rig {{ .Rig }} show <bead-id>   # expect IN_PROGRESS within a few minutes
 ```
 
+**When you dispatch work, ask gc to tell you when it is done.** Right after
+`gc sling`, register a wait on the source bead (not the workflow's steps):
+
+```bash
+gc session wait "$GC_SESSION_ID" --on-beads <bead-id> --note "<bead-id> closed: <what to do now, e.g. review and merge PR>"
+```
+
+gc keeps the wait across restarts and delivers the note, waking you if you
+are idle, when the bead closes (all listed beads; `--any` for the first).
+It works for beads of your child rigs too. A suspended rig's beads do not
+satisfy a wait until the rig resumes.
+
 ### `--nudge` on a pool target fails loudly and harmlessly (gc 1.4.1)
 
 On a **pool** target the `--nudge` leg prints
