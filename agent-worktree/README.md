@@ -216,11 +216,34 @@ still needs the city import for the `ensure` command.
 
 **Adopting an existing named session.**
 
-> **Placeholder (WI-7, RC-1).** gc records a session's work_dir on its session
-> bead and prefers it over the template's on later starts, so a named session
-> created before the patch may keep starting in the rig root. The step that
-> makes such a session pick up the new work_dir is filled in here from the
-> scratch-city adoption pass.
+gc records a session's work_dir on its session bead when the bead is
+created, and every later start of that bead reuses it. A named session that
+already existed before the patch therefore keeps starting in the rig root.
+The ensure command still creates the worktree, but the session does not move
+into it. In the scratch city, all of these kept the old dir:
+
+- the config-drift restart that loading the patch triggers;
+- `gc session suspend` followed by `gc session wake`;
+- `gc session reset`;
+- `gc session kill`.
+
+To adopt the patch, close the named session once, after the patch is loaded:
+
+```sh
+gc session close <rig>/<binding>.<agent>    # for example feedlot-packs/oversight-rig.project-lead
+```
+
+> **Warning:** closing ends the session's conversation. The new session
+> starts with a fresh provider conversation, not a resumed one.
+
+The controller then creates the named session again on a new bead, which
+records the worktree as its work_dir. Later restarts, including
+`gc session kill`, keep it. Work assigned to the named identity stays
+assigned and is served by the new session (`gc session close --help`). This
+was verified with `mode = "always"`, where the controller recreates the
+session at once (see [E2E evidence](#e2e-evidence)). Only an existing session
+needs this step: a named session first created after the patch starts in
+its worktree.
 
 ## pre_start ordering
 
@@ -501,14 +524,179 @@ the chat agent template itself. It is harmless and can be removed with
 
 ## E2E evidence
 
-> **Placeholder (WI-7).** The scratch-city run fills this section in: the
-> exact commands and trimmed output for the patched `work_dir` and effective
-> `pre_start` order from `gc config show`, an unpatched agent unchanged, the
-> work_dir on start 1 and start 2, the marker file surviving, a single
-> `agent-` worktree in `git worktree list`, a clean rig `git status`, the
-> pre_start wall time with an unreachable origin, the observed
-> `{{.AgentBase}}` value, the adoption pass, and the herdr observation or
-> "not observed".
+This was checked in a throwaway scratch city, never a live one, on
+2026-11-19. The setup:
+
+- the scratch city's own gc build (`gc version`: `dev-3bb5a3e10`), its own
+  supervisor and `GC_HOME`, and its own herdr session (`herdr --session ws-e2e`);
+- this pack imported from a local checkout twice: at city scope as
+  `agent-worktree` with `agents_exclude = ["chat"]`, and at rig scope as
+  `chat` in rig `testrig`;
+- a toy rig `testrig`, cloned from a local bare origin;
+- a stand-in for `project-lead`: a scratch pack imported at city scope as
+  `e2e`. Its rig-scoped `lead` agent uses a shell provider, has
+  `work_dir = "{{.RigRoot}}"` and no `pre_start`, and has a
+  `[[named_session]]` with `mode = "always"`;
+- the opt-in patch from [Opt in a named agent](#opt-in-a-named-agent), with
+  `dir = "testrig"` and `name = "e2e.lead"`.
+
+Below, `<run2>` is the scratch directory, and `gc` is run as
+`bin/run gc --city <run2>/city`. `bin/run` gives a clean environment with
+the scratch `GC_HOME` and `PATH`. Output is trimmed.
+
+**Config resolution.** The patched agent, the same agent in another rig,
+and an unpatched agent:
+
+```text
+$ gc config show
+[[agent]]
+name = "lead"
+dir = "testrig"
+work_dir = "{{.RigRoot}}/worktrees/agent-{{.AgentBase}}"
+pre_start = ["gc agent-worktree ensure {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+
+[[agent]]
+name = "lead"
+dir = "trustrig"                 # same agent, other rig: unchanged
+work_dir = "{{.RigRoot}}"
+
+[[agent]]
+name = "chat"
+dir = "testrig"                  # unpatched agent: unchanged
+work_dir = "{{.RigRoot}}/worktrees/chat-{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/agent-worktree.sh chat {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+```
+
+No `chat` agent came from the city import; the two `chat` agents in the
+output are the rigs' own imports.
+
+**pre_start order.** A config-only copy of the city added an agent with two
+`pre_start` entries of its own, and imported `oversight-rig` with the same
+patch for `oversight-rig.project-lead`:
+
+```text
+$ gc --city <probe-city> config show --json     # Agents[].Dir, .Name, .PreStart
+testrig   lead          ["echo own-1 {{.WorkDir}}", "echo own-2",
+                         "gc agent-worktree ensure {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+trustrig  lead          ["echo own-1 {{.WorkDir}}", "echo own-2"]
+testrig   project-lead  work_dir "{{.RigRoot}}/worktrees/agent-{{.AgentBase}}",
+                        ["gc agent-worktree ensure {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+trustrig  project-lead  work_dir "{{.RigRoot}}", no pre_start
+```
+
+gc's own entries come last. The supervisor log shows the resolved list for
+a Claude `chat` session, with gc's skill materialization after the pack's
+entry:
+
+```text
+PreStart: [<pack>/assets/scripts/agent-worktree.sh chat <run2>/testrig <run2>/testrig/worktrees/chat-chat.chat-adhoc-24eff23299 chat.chat-adhoc-24eff23299
+           "${GC_BIN:-gc}" internal materialize-skills --best-effort --agent testrig/chat.chat --workdir <run2>/testrig/worktrees/chat-chat.chat-adhoc-24eff23299]
+```
+
+The shell-provider `lead` got no gc entries; its resolved list was the
+ensure command alone.
+
+**Adoption pass.** The named session was started before the patch, then
+restarted after it:
+
+```text
+# before the patch
+$ gc session list                 # gcg-5975  testrig/e2e.lead  active  WORKDIR <run2>/testrig
+# add the patch, then:
+$ gc reload                       # Config reloaded: 15 agents, 2 rigs
+                                  # log: config-drift testrig--e2e__lead: drifted fields: PreStart
+$ gc session list                 # gcg-5975  active  WORKDIR <run2>/testrig
+$ readlink /proc/<pid>/cwd        # <run2>/testrig
+$ git -C <run2>/testrig worktree list | grep agent-
+<run2>/testrig/worktrees/agent-e2e.lead  9708b81 [gc-agent-e2e.lead]
+$ gc session suspend gcg-5975; gc session wake gcg-5975   # process cwd still <run2>/testrig
+$ gc session reset gcg-5975                               # process cwd still <run2>/testrig;
+                                                          # bead work_dir still <run2>/testrig
+$ gc session close gcg-5975       # Session gcg-5975 closed.
+$ gc session list                 # gcg-6018  testrig/e2e.lead  active
+                                  #   WORKDIR <run2>/testrig/worktrees/agent-e2e.lead
+$ readlink /proc/<pid>/cwd        # <run2>/testrig/worktrees/agent-e2e.lead
+```
+
+So the old dir wins until the session is closed once. Closing it by alias
+(`gc session close testrig/e2e.lead`) works the same way: the controller
+recreated it as `gcg-6060`, in the same worktree.
+
+**Start 1.** For a clean first creation, the session was suspended, its
+worktree and branch were removed, and `origin` was pointed at an
+unreachable address (`https://192.0.2.1/unreachable.git`). Then:
+
+```text
+$ gc session wake gcg-6018
+$ gc session list                 # gcg-6018  active  WORKDIR <run2>/testrig/worktrees/agent-e2e.lead
+$ readlink /proc/<pid>/cwd        # <run2>/testrig/worktrees/agent-e2e.lead
+$ git -C <run2>/testrig worktree list
+<run2>/testrig                           98b7f67 [main]
+<run2>/testrig/worktrees/agent-e2e.lead  9708b81 [gc-agent-e2e.lead]
+<run2>/testrig/worktrees/chat-chat.chat-adhoc-…  (four chat sessions from earlier runs)
+$ git -C <run2>/testrig/worktrees/agent-e2e.lead status --short     # (empty)
+$ git -C <run2>/testrig status --short
+ M .beads/config.yaml
+ M .gitignore
+?? .claude/
+```
+
+- The observed `{{.AgentBase}}` is `e2e.lead`: the binding plus the local
+  name, without the rig. The worktree is `worktrees/agent-e2e.lead`, on
+  `gc-agent-e2e.lead`, cut from `origin/main` (`9708b81`), the last fetched
+  ref.
+- The rig's `git status` is identical before and after the run. The three
+  entries were left by gc's rig and beads setup before this run began. The
+  pack added none: `worktrees/` and `.gc/` are in the local exclude file.
+- The start succeeded with the fetch timing out, inside gc's 10 s
+  `setup_timeout`. Timed directly, with the same unreachable origin, for a
+  probe name:
+
+  ```text
+  $ cd <run2>/testrig
+  $ /usr/bin/time -f 'wall=%es rc=%x' bin/run env GC_CITY=<run2>/city \
+      gc agent-worktree ensure <run2>/testrig <run2>/testrig/worktrees/agent-e2e.timing e2e.timing
+  wall=5.09s rc=0
+  ```
+
+  That is the 5 s fetch bound plus gc's start-up. The supervisor's
+  `start_call` for this start was 21.5 s, against 16.3 s to 16.9 s for this
+  session's other starts with a reachable origin, before and after the
+  patch. `origin` was restored afterwards, and the probe worktree and branch
+  were removed.
+
+**Start 2.** A marker file, then a restart that keeps the bead:
+
+```text
+$ touch <run2>/testrig/worktrees/agent-e2e.lead/wi7-marker
+$ gc session kill gcg-6018        # Session gcg-6018 killed.  (the controller restarts it)
+$ gc session list                 # gcg-6018  active  WORKDIR <run2>/testrig/worktrees/agent-e2e.lead
+$ readlink /proc/<new pid>/cwd    # <run2>/testrig/worktrees/agent-e2e.lead
+$ ls <run2>/testrig/worktrees/agent-e2e.lead/wi7-marker           # present
+$ git -C <run2>/testrig worktree list | grep -c /worktrees/agent-  # 1
+$ git -C <run2>/testrig/worktrees/agent-e2e.lead status --short   # ?? wi7-marker
+```
+
+The restarted session's work_dir was checked from its process, not assumed.
+
+**herdr.** Observed through the scratch city's own herdr session only:
+
+```text
+$ herdr --session ws-e2e workspace list
+w1  "testrig"   is_linked_worktree=false  <run2>/testrig
+w6  "trustrig"  is_linked_worktree=false  <trustrig>
+wF  "lead"      is_linked_worktree=true   <run2>/testrig/worktrees/agent-e2e.lead
+$ herdr --session ws-e2e worktree list --workspace w1
+gc-agent-e2e.lead  linked  open_workspace_id=wF  <run2>/testrig/worktrees/agent-e2e.lead
+$ herdr --session ws-e2e tab list
+w6:t2  "lead"     # the unpatched trustrig/e2e.lead: a tab in its rig's workspace
+```
+
+The opted-in session opened as a worktree workspace under the rig, and the
+unpatched one in the other rig stayed a tab.
+
+No gc-managed file was refused. Besides the checkout, the new worktree held
+only `.gc/`, which the script already accepts.
 
 ## Testing
 
