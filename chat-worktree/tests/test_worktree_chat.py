@@ -31,6 +31,9 @@ FALLBACK_TOOLS = (
     "sed",
     "mkdir",
     "rmdir",
+    "mv",
+    "rm",
+    "mktemp",
     "dirname",
     "basename",
     "cat",
@@ -406,9 +409,128 @@ def test_rig_status_clean_and_exclude_once(repos: Repos):
 
     assert repos.git("-C", repos.rig, "status", "--porcelain") == ""
     lines = exclude.read_text(encoding="utf-8").splitlines()
-    assert lines == ["*.swp", "/worktrees/"]
+    assert lines == ["*.swp", "/worktrees/", "/.gc/"]
     assert not (repos.rig / ".gitignore").exists()
     subprocess.run(["git", "-C", str(repos.rig), "diff", "--exit-code"], env=repos.env, check=True)
+
+
+# gc 1.5.1 writes its managed settings, and each provider's hook and overlay
+# files, into the work_dir before pre_start runs, so a new chat work_dir is
+# never empty in a real city.
+GC_SETTINGS = {".gc/settings.json": b'{"hooks": {}}\n'}
+
+
+def write_files(directory: Path, files: dict[str, bytes]) -> None:
+    for relative, content in files.items():
+        path = directory / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def stage_leftovers(repos: Repos) -> list[Path]:
+    return sorted((repos.rig / "worktrees").glob(".chat-worktree-stage.*"))
+
+
+def test_accepts_gc_settings_written_before_pre_start(repos: Repos):
+    wt = repos.target("alder")
+    write_files(wt, GC_SETTINGS)
+
+    result = repos.run("alder")
+
+    assert result.returncode == 0, result.stderr
+    assert_created(repos, "alder")
+    assert (wt / "one.txt").is_file()
+    assert snapshot(wt / ".gc") == {"settings.json": GC_SETTINGS[".gc/settings.json"]}
+    assert stage_leftovers(repos) == []
+
+
+def test_accepts_provider_overlay_files(repos: Repos):
+    wt = repos.target("alder")
+    files = {
+        **GC_SETTINGS,
+        ".codex/hooks.json": b"{}\n",
+        ".claude/skills/demo/SKILL.md": b"demo\n",
+        "AGENTS.md": b"kiro\n",
+    }
+    write_files(wt, files)
+
+    result = repos.run("alder")
+
+    assert result.returncode == 0, result.stderr
+    assert repos.git("-C", wt, "branch", "--show-current") == "gc-chat-alder"
+    after = snapshot(wt)
+    for relative, content in files.items():
+        assert after[relative] == content
+    assert stage_leftovers(repos) == []
+
+
+def test_refuses_gc_files_mixed_with_foreign_content(repos: Repos):
+    wt = repos.target("alder")
+    write_files(wt, {**GC_SETTINGS, "foreign.txt": b"not ours\n"})
+    before = snapshot(wt)
+
+    result = repos.run("alder")
+
+    assert_refused(result, wt)
+    assert snapshot(wt) == before
+    assert not repos.branch_exists("gc-chat-alder")
+    assert stage_leftovers(repos) == []
+
+
+def test_checkout_files_win_over_gc_copies(repos: Repos):
+    write_files(repos.seed, {".claude/settings.json": b"tracked\n"})
+    repos.git("-C", repos.seed, "add", ".claude/settings.json")
+    repos.git("-C", repos.seed, "commit", "-q", "-m", "claude settings")
+    repos.git("-C", repos.seed, "push", "-q", "origin", "main")
+    wt = repos.target("alder")
+    write_files(wt, {".claude/settings.json": b"gc copy\n", ".claude/extra.json": b"extra\n"})
+
+    result = repos.run("alder")
+
+    assert result.returncode == 0, result.stderr
+    assert (wt / ".claude" / "settings.json").read_bytes() == b"tracked\n"
+    assert (wt / ".claude" / "extra.json").read_bytes() == b"extra\n"
+    assert repos.git("-C", wt, "status", "--porcelain") == "?? .claude/extra.json"
+    assert stage_leftovers(repos) == []
+
+
+def test_gc_files_are_restored_when_the_worktree_cannot_be_added(repos: Repos):
+    # The branch is already checked out elsewhere, so worktree add fails.
+    repos.git("-C", repos.rig, "worktree", "add", "-q", "-b", "gc-chat-alder", repos.tmp / "elsewhere")
+    wt = repos.target("alder")
+    write_files(wt, GC_SETTINGS)
+    before = snapshot(wt)
+
+    result = repos.run("alder")
+
+    assert_refused(result, wt)
+    assert snapshot(wt) == before
+    assert stage_leftovers(repos) == []
+
+
+def test_parallel_runs_write_each_exclude_line_once(repos: Repos):
+    # gc starts sessions in parallel; their exclude updates must not race
+    # into duplicate lines.
+    names = [f"chat-adhoc-{index:010x}" for index in range(8)]
+    runs = [
+        subprocess.Popen(
+            [str(SCRIPT), str(repos.rig), str(repos.target(name)), name],
+            env=repos.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for name in names
+    ]
+    for run in runs:
+        _, stderr = run.communicate(timeout=60)
+        assert run.returncode == 0, stderr
+
+    common = Path(repos.git("-C", repos.rig, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    lines = (common / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+    assert lines.count("/worktrees/") == 1
+    assert lines.count("/.gc/") == 1
+    assert not list((common / "info").glob("exclude.chat-worktree.*"))
 
 
 @pytest.mark.parametrize("name", ["a..b", "a b", "x~1"])

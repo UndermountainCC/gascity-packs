@@ -11,15 +11,21 @@
 #   - A new branch is cut from origin/HEAD, else origin/main, else the rig's
 #     local HEAD, after a fetch bounded by CHAT_WORKTREE_FETCH_TIMEOUT
 #     seconds (default 5, clamped to 1..8).
-#   - A non-empty directory that is not a worktree of this rig is refused.
-#   - /worktrees/ is kept in the rig's local info/exclude, so the rig
-#     checkout's status stays clean.
+#   - gc writes provider hook and overlay files (such as .gc/settings.json)
+#     into the work_dir before pre_start runs. A directory holding only
+#     those is accepted: they are set aside while the worktree is added,
+#     then put back wherever the checkout has no file of its own.
+#   - Any other non-empty directory that is not a worktree of this rig is
+#     refused.
+#   - /worktrees/ and /.gc/ are kept in the rig's local info/exclude, so the
+#     rig checkout's status and each chat worktree's status stay clean.
 #
 # Deliberately absent, compared with gastown's worktree-setup.sh:
 #   - no --sync: an existing worktree or branch is never pulled, rebased,
 #     checked out or reset, so a session never loses work on restart;
 #   - no .beads/redirect;
-#   - no stage-and-merge of stray files into a foreign directory.
+#   - no stage-and-merge of arbitrary stray files: only gc's own files are
+#     set aside, so a foreign directory is still refused untouched.
 # The script never deletes a worktree or a branch; see the pack README.
 #
 # Every failure prints one stderr line prefixed "worktree-chat:" and exits 1.
@@ -131,14 +137,31 @@ bounded() {
 RIG_COMMON=$(git_common_dir "$RIG_ROOT") ||
     die "cannot resolve the git common dir of $RIG_ROOT"
 EXCLUDE="$RIG_COMMON/info/exclude"
-if ! grep -qxF '/worktrees/' "$EXCLUDE" 2>/dev/null; then
+# /.gc/ is gc's runtime state, including the settings it writes into every
+# chat worktree; excluding it keeps a session from committing it.
+exclude_has_all() {
+    grep -qxF /worktrees/ "$1" 2>/dev/null && grep -qxF /.gc/ "$1" 2>/dev/null
+}
+# Sessions start in parallel, so appending in place would race and duplicate
+# lines. Instead, complete a private copy and rename it over the file: the
+# copy is checked and extended from one snapshot, and every writer adds the
+# same lines, so concurrent writers converge on one copy of each.
+if ! exclude_has_all "$EXCLUDE"; then
+    EXCLUDE_TMP="$EXCLUDE.chat-worktree.$$"
     {
         mkdir -p "$RIG_COMMON/info" &&
-            if [ -s "$EXCLUDE" ] && [ -n "$(tail -c 1 "$EXCLUDE")" ]; then
-                printf '\n' >>"$EXCLUDE"
+            if [ -s "$EXCLUDE" ]; then cat "$EXCLUDE" >"$EXCLUDE_TMP"; else : >"$EXCLUDE_TMP"; fi &&
+            if [ -s "$EXCLUDE_TMP" ] && [ -n "$(tail -c 1 "$EXCLUDE_TMP")" ]; then
+                printf '\n' >>"$EXCLUDE_TMP"
             fi &&
-            printf '/worktrees/\n' >>"$EXCLUDE"
-    } 2>/dev/null || die "cannot update $EXCLUDE"
+            for PATTERN in /worktrees/ /.gc/; do
+                grep -qxF "$PATTERN" "$EXCLUDE_TMP" || printf '%s\n' "$PATTERN" >>"$EXCLUDE_TMP"
+            done &&
+            mv -f "$EXCLUDE_TMP" "$EXCLUDE"
+    } 2>/dev/null || {
+        rm -f "$EXCLUDE_TMP" 2>/dev/null
+        die "cannot update $EXCLUDE"
+    }
 fi
 
 # An existing worktree is reused untouched: no fetch, checkout or reset.
@@ -158,9 +181,65 @@ fi
 if [ -e "$WT" ] && [ ! -d "$WT" ]; then
     die "refusing $WT: exists and is not a directory"
 fi
+# Top-level entries gc 1.5.1 may write into a work_dir before pre_start: its
+# managed settings (.gc), and the hook and overlay files of each provider
+# (.claude, core's per-provider overlays, and kiro's AGENTS.md).
+is_gc_managed() {
+    case $1 in
+        .gc | .claude | .agents | .codex | .cursor | .gemini | .github | .kimi | \
+            .kiro | .mimocode | .omp | .opencode | .pi | AGENTS.md)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# merge_entry <src> <dst>: move src to dst, descending into directories, and
+# never replacing anything already at dst. What cannot be placed stays in
+# src, so the checkout's own files always win over gc's copies.
+merge_entry() (
+    if [ -d "$1" ] && [ ! -L "$1" ]; then
+        mkdir -p "$2" 2>/dev/null || exit 0
+        for MERGE_ENTRY in "$1"/.[!.]* "$1"/..?* "$1"/*; do
+            [ -e "$MERGE_ENTRY" ] || [ -L "$MERGE_ENTRY" ] || continue
+            merge_entry "$MERGE_ENTRY" "$2/$(basename "$MERGE_ENTRY")"
+        done
+        rmdir "$1" 2>/dev/null || true
+        exit 0
+    fi
+    [ -e "$2" ] || [ -L "$2" ] || mv "$1" "$2" 2>/dev/null || true
+)
+
+# Put the set-aside files back into the work_dir. Runs on success, and from
+# the traps when the worktree could not be added, so gc's files are never
+# lost. Leftovers are only copies the checkout already has.
+STAGE=""
+restore_stage() {
+    [ -n "$STAGE" ] || return 0
+    mkdir -p "$WT" 2>/dev/null || true
+    for STAGE_ENTRY in "$STAGE"/.[!.]* "$STAGE"/..?* "$STAGE"/*; do
+        [ -e "$STAGE_ENTRY" ] || [ -L "$STAGE_ENTRY" ] || continue
+        merge_entry "$STAGE_ENTRY" "$WT/$(basename "$STAGE_ENTRY")"
+    done
+    rm -rf "$STAGE" 2>/dev/null || true
+    STAGE=""
+}
+
 if [ -d "$WT" ]; then
+    for ENTRY in "$WT"/.[!.]* "$WT"/..?* "$WT"/*; do
+        [ -e "$ENTRY" ] || [ -L "$ENTRY" ] || continue
+        is_gc_managed "$(basename "$ENTRY")" ||
+            die "refusing $WT: exists, is not empty, and is not a git worktree"
+    done
     if [ -n "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
-        die "refusing $WT: exists, is not empty, and is not a git worktree"
+        STAGE=$(mktemp -d "$(dirname "$WT")/.chat-worktree-stage.XXXXXX" 2>/dev/null) ||
+            die "cannot set aside gc's files in $WT"
+        trap 'restore_stage' EXIT
+        trap 'restore_stage; exit 1' HUP INT TERM
+        for ENTRY in "$WT"/.[!.]* "$WT"/..?* "$WT"/*; do
+            [ -e "$ENTRY" ] || [ -L "$ENTRY" ] || continue
+            mv "$ENTRY" "$STAGE/" 2>/dev/null || die "cannot set aside gc's files in $WT"
+        done
     fi
     rmdir "$WT" 2>/dev/null || die "cannot remove empty directory $WT"
 fi
@@ -205,3 +284,6 @@ if [ "$ADD_STATUS" -ne 0 ]; then
     ADD_REASON=$(printf '%s\n' "$ADD_ERR" | sed '/^[[:space:]]*$/d' | tail -n 1)
     die "failed to create $WT from $RIG_ROOT (branch $BRANCH)${ADD_REASON:+: $ADD_REASON}"
 fi
+
+restore_stage
+trap - EXIT HUP INT TERM
