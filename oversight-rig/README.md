@@ -69,6 +69,21 @@ created are mailed, a city-wide `GC_OVERSIGHT_CHILD_RIGS` never mails one lead
 about another lead's work. The city-level instance, when the pack is also
 imported by the city, has no rig and exits 0 without reading anything.
 
+**Which lead.** By default the lead is `<rig>/oversight-rig.project-lead`. A
+rig whose lead is another agent sets `GC_OVERSIGHT_LEAD` to that agent's
+address (`--to` still wins when run by hand). `GC_OVERSIGHT_LEAD_ALIASES`
+(comma-separated, or `--lead-aliases`) lists other names the lead created or
+closed beads under, such as its address before a rename. Aliases count as the
+lead both for `created_by` and for "the lead closed it itself", and so do the
+sessions whose template is one of them. Mail always goes to the one lead
+address.
+
+```bash
+# The feedlot rig's lead is feedlot/feedlot-lead, formerly feedlot-lead.
+GC_OVERSIGHT_LEAD=feedlot/feedlot-lead
+GC_OVERSIGHT_LEAD_ALIASES=feedlot-lead
+```
+
 **What it does.**
 
 1. `gc events --type bead.closed --since 10m`. Event orders run on the
@@ -79,8 +94,8 @@ imported by the city, has no rig and exits 0 without reading anything.
    mail, `gc.synthetic` beads, workflow steps (`gc.kind`, `gc.step_id`) and
    order tracking beads. Those are never read.
 3. `gc bd show <id> --json`: keeps the bead if `created_by` is the lead (its
-   address, or a session id, name or alias of a session with the lead's
-   template) and it is still closed. A close by the lead itself is not mailed
+   address or one of its aliases, or a session id, name or alias of a session
+   whose template is one of those) and it is still closed. A close by the lead itself is not mailed
    back to it.
 4. `gc mail send <lead> --dedup dispatched-close:<id>:<closed_at> --notify`.
    The subject is `[order dispatched-close-watch] Closed: <id> <title>`; the
