@@ -1,4 +1,4 @@
-"""Static layout checks for the chat-worktree pack (REQ-001 to REQ-003, REQ-009, REQ-010)."""
+"""Static layout checks for the agent-worktree pack (REQ-001 to REQ-004, REQ-009, REQ-010)."""
 
 from __future__ import annotations
 
@@ -8,17 +8,21 @@ import re
 import subprocess
 import tomllib
 
+import pytest
+
 
 PACK = Path(__file__).resolve().parents[1]
 AGENT_DIR = PACK / "agents" / "chat"
-SCRIPT = PACK / "assets" / "scripts" / "worktree-chat.sh"
+SCRIPT = PACK / "assets" / "scripts" / "agent-worktree.sh"
+ENSURE_DIR = PACK / "commands" / "ensure"
+ENSURE = ENSURE_DIR / "run.sh"
 
 EXPECTED_AGENT = {
     "scope": "rig",
     "wake_mode": "fresh",
     "work_dir": "{{.RigRoot}}/worktrees/chat-{{.AgentBase}}",
     "pre_start": [
-        "{{.ConfigDir}}/assets/scripts/worktree-chat.sh"
+        "{{.ConfigDir}}/assets/scripts/agent-worktree.sh chat"
         " {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"
     ],
     "min_active_sessions": 0,
@@ -37,7 +41,7 @@ FORBIDDEN_NEEDLES = ("re" + "matu", "ses" + "ión", "char" + "la")
 # Cleanup is manual and documented; no shipped file may run it (AC-09).
 DESTRUCTIVE_COMMANDS = ("git worktree " + "remove", "git branch " + "-D")
 
-# The script never syncs an existing worktree; these words may appear only in
+# The scripts never sync an existing worktree; these words may appear only in
 # comments that explain their absence (AC-03).
 SYNC_WORDS = ("pull", "rebase", "--sync", "redirect")
 
@@ -58,7 +62,7 @@ def namepool_names() -> list[str]:
 
 def test_pack_manifest_is_standalone():
     manifest = load_toml(PACK / "pack.toml")
-    assert manifest["pack"]["name"] == "chat-worktree"
+    assert manifest["pack"]["name"] == "agent-worktree"
     assert manifest["pack"]["schema"] == 2
     assert "imports" not in manifest
     assert "service" not in manifest
@@ -122,12 +126,13 @@ def shipped_files() -> list[Path]:
     ]
 
 
-def test_prestart_script_is_executable():
-    assert SCRIPT.is_file()
-    assert os.access(SCRIPT, os.X_OK)
+@pytest.mark.parametrize("script", [SCRIPT, ENSURE], ids=lambda path: path.name)
+def test_prestart_script_is_executable(script: Path):
+    assert script.is_file()
+    assert os.access(script, os.X_OK)
     tracked = subprocess.run(
-        ["git", "ls-files", "-s", "--", SCRIPT.name],
-        cwd=SCRIPT.parent,
+        ["git", "ls-files", "-s", "--", script.name],
+        cwd=script.parent,
         capture_output=True,
         text=True,
     )
@@ -135,15 +140,25 @@ def test_prestart_script_is_executable():
         assert tracked.stdout.split()[0] == "100755"
 
 
+def test_ensure_command_files_exist():
+    for name in ("run.sh", "help.md", "command.toml"):
+        assert (ENSURE_DIR / name).is_file(), name
+    assert load_toml(ENSURE_DIR / "command.toml") == {
+        "description": "Ensure an opted-in agent's git worktree (pre_start)"
+    }
+
+
 def test_no_shipped_file_deletes_worktrees_or_branches():
+    assert {SCRIPT, ENSURE} <= set(shipped_files())
     for path in shipped_files():
         text = path.read_text(encoding="utf-8", errors="replace")
         for command in DESTRUCTIVE_COMMANDS:
             assert command not in text, f"{path.relative_to(PACK)} contains {command!r}"
 
 
-def test_prestart_script_mentions_sync_words_only_in_comments():
-    for number, line in enumerate(SCRIPT.read_text(encoding="utf-8").splitlines(), 1):
+@pytest.mark.parametrize("script", [SCRIPT, ENSURE], ids=lambda path: path.name)
+def test_prestart_script_mentions_sync_words_only_in_comments(script: Path):
+    for number, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1):
         if line.lstrip().startswith("#"):
             continue
         lowered = line.lower()

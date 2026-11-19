@@ -71,10 +71,10 @@ They only name the reconciler's pool slots (shown by `gc status` as
 
 ```toml
 work_dir = "{{.RigRoot}}/worktrees/chat-{{.AgentBase}}"
-pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-chat.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+pre_start = ["{{.ConfigDir}}/assets/scripts/agent-worktree.sh chat {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
 ```
 
-Before the session starts, gc runs `assets/scripts/worktree-chat.sh` on the
+Before the session starts, gc runs `assets/scripts/agent-worktree.sh` on the
 host. It makes sure the work_dir is a worktree of the rig on branch
 `gc-chat-<name>`:
 
@@ -101,7 +101,7 @@ host. It makes sure the work_dir is a worktree of the rig on branch
    3. the rig's current `HEAD` (a repo with no `origin`).
 
    Before cutting, it fetches that remote branch. The fetch is bounded by
-   `CHAT_WORKTREE_FETCH_TIMEOUT` seconds: default 5, clamped to 1..8, which
+   `AGENT_WORKTREE_FETCH_TIMEOUT` seconds: default 5, clamped to 1..8, which
    leaves room inside gc's 10 s setup timeout. On a timeout or a failure it
    cuts from the last fetched ref. Only a new branch fetches.
 
@@ -124,7 +124,7 @@ rebases, resets or syncs, and it writes no `.beads/redirect`.
   same origin.
 - **Empty directory.** An empty work_dir is used as the creation target.
 
-Every refusal is one `stderr` line starting with `worktree-chat:` and naming
+Every refusal is one `stderr` line starting with `agent-worktree:` and naming
 the path, and the session does not start. gc 1.5.1 then drops the failed
 session; open a new one after fixing the cause.
 
