@@ -149,3 +149,9 @@ def test_prestart_script_mentions_sync_words_only_in_comments():
         lowered = line.lower()
         for word in SYNC_WORDS:
             assert word not in lowered, f"line {number}: {line.strip()}"
+
+
+def test_prestart_script_skips_lfs_smudge_before_worktree_add():
+    text = SCRIPT.read_text(encoding="utf-8")
+    exported = text.index("GIT_LFS_SKIP_SMUDGE=1\nexport GIT_LFS_SKIP_SMUDGE\n")
+    assert exported < text.index('"$RIG_ROOT" worktree add')

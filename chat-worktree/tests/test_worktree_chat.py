@@ -54,6 +54,13 @@ def git_env(tmp_path: Path) -> dict[str, str]:
         GIT_AUTHOR_EMAIL="chat-worktree@example.invalid",
         GIT_COMMITTER_NAME="Chat Worktree Test",
         GIT_COMMITTER_EMAIL="chat-worktree@example.invalid",
+        # No detached auto-maintenance: it can write .git/objects/maintenance.lock
+        # after a commit returns and break the before/after snapshots.
+        GIT_CONFIG_COUNT="2",
+        GIT_CONFIG_KEY_0="maintenance.auto",
+        GIT_CONFIG_VALUE_0="false",
+        GIT_CONFIG_KEY_1="gc.auto",
+        GIT_CONFIG_VALUE_1="0",
     )
     env.pop("CHAT_WORKTREE_FETCH_TIMEOUT", None)
     return env
