@@ -33,8 +33,8 @@ The project-lead writes a rollup bead labeled `severity:escalate`. A scheduled o
 ## What's in the pack
 
 - `agents/project-lead/` — the role (agent config, prompt template, and a `project-brief.template.md` to copy per rig)
-- `orders/` — `patrol-project-leads` (triage cadence), `escalate-rollups` (deterministic delivery) and `dispatched-close-watch` (wakes the lead when its work closes)
-- `assets/scripts/` — the delivery script, a rig→channel resolver and the dispatched-close watcher
+- `orders/` — `patrol-project-leads` (triage cadence) and `escalate-rollups` (deterministic delivery)
+- `assets/scripts/` — the delivery script and a rig→channel resolver
 - `skills/city-executive-status/` — an optional workflow for maintaining an Obsidian-compatible portfolio brief from project-owner updates
 
 ## Optional executive status brief
@@ -46,82 +46,9 @@ through a deployment-specific adapter.
 
 Importing this pack exposes the skill but does not activate its example
 schedules or write to a vault. The only active pack orders remain
-`patrol-project-leads`, `escalate-rollups` and `dispatched-close-watch`. To enable the workflow, follow the
+`patrol-project-leads` and `escalate-rollups`. To enable the workflow, follow the
 skill's `SKILL.md`, copy its environment and order examples into the consuming
 city, configure local paths, and verify dry-run output before scheduling writes.
-
-## Dispatched-close watch
-
-A project-lead that dispatches work and then waits can sit idle with finished
-work: nothing tells it that a bead it created has closed. The
-`dispatched-close-watch` order fixes that without changing gc. It runs
-`assets/scripts/dispatched-close-watch.py` on every `bead.closed` event and,
-when a bead the lead created closes, mails `<rig>/oversight-rig.project-lead`
-with `--notify` so the lead gets a turn. It changes nothing else: the lead
-decides what to do next.
-
-**Which rigs.** The order is rig-scoped: each rig that imports the pack gets
-its own instance, run with `$GC_RIG` set, and that rig's lead is told. A lead
-that also dispatches into child rigs lists them in `GC_OVERSIGHT_CHILD_RIGS`
-(comma-separated rig names, set in the city's or the order's environment).
-Bead prefixes come from `gc rig list`. Because only beads the lead itself
-created are mailed, a city-wide `GC_OVERSIGHT_CHILD_RIGS` never mails one lead
-about another lead's work. The city-level instance, when the pack is also
-imported by the city, has no rig and exits 0 without reading anything.
-
-**What it does.**
-
-1. `gc events --type bead.closed --since 10m`. Event orders run on the
-   controller tick, so a close is mailed within a tick or two; the 10 minutes
-   are a margin. A close reaches the bus twice (from the closing session, then
-   as `cache-reconcile`), so events are grouped by bead.
-2. From the event payload it drops what is not a task: other rigs, convoys,
-   mail, `gc.synthetic` beads, workflow steps (`gc.kind`, `gc.step_id`) and
-   order tracking beads. Those are never read.
-3. `gc bd show <id> --json`: keeps the bead if `created_by` is the lead (its
-   address, or a session id, name or alias of a session with the lead's
-   template) and it is still closed. A close by the lead itself is not mailed
-   back to it.
-4. `gc mail send <lead> --dedup dispatched-close:<id>:<closed_at> --notify`.
-   The subject is `[order dispatched-close-watch] Closed: <id> <title>`; the
-   body has the bead, who closed it, `gc.outcome` and the first 500 characters
-   of the close reason.
-
-**Sender.** The mail shows as sent by `human`: `gc mail send --from` only
-accepts the calling session's own identity, and an order has none. The
-`[order dispatched-close-watch]` subject prefix and a line in the body say
-that it is an automated notice from this order, not a person.
-
-A mailed close is kept for 2 hours in
-`$GC_PACK_STATE_DIR/dispatched-close-watch.json`, so later runs inside the
-10-minute window do not send it again; the mail's dedup key covers a run
-without that file. A bead that is reopened and closed again has a new
-`closed_at` and is mailed again.
-
-**Fails loud.** If `gc rig list` or `gc events` cannot be read, a watched rig
-is unknown, a bead cannot be read, or a mail fails, the script exits 2 and
-`gc order history` records a failed run. A failed mail is retried on the next
-run.
-
-**Read-only.** It only runs `gc events`, `gc rig list`, `gc bd show`,
-`gc session list` and `gc mail send`; the tests check that it makes no other
-call.
-
-```bash
-# Dry run by hand: prints the mails to stderr and sends none.
-GC_RIG=<rig> GC_OVERSIGHT_CHILD_RIGS=<child,...> \
-  python3 oversight-rig/assets/scripts/dispatched-close-watch.py --since 2h --dry-run
-python3 -m pytest oversight-rig/tests/test_dispatched_close_watch.py -q
-```
-
-The tests use a fake `gc` (`tests/fixtures/dispatched-close/`) and the real
-close of `rgc-ba8` from 2026-11-19, with paths made generic.
-
-Limits: it does not say when a worker went idle without closing (only closes
-are events), and "dispatched by the lead" means `created_by` is the lead — a
-bead someone else created and the lead only slung is not mailed.
-
-Ported from rematu's project-lead work in rematu/gascity#13 (a8bb33c).
 
 ## Requirements
 
