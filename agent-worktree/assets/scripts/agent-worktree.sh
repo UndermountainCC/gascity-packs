@@ -1,15 +1,23 @@
 #!/bin/sh
-# worktree-chat.sh — pre_start for the chat-worktree pack's chat agent.
+# agent-worktree.sh — pre_start that gives an agent its own git worktree.
 #
-# Usage: worktree-chat.sh <rig-root> <target-dir> <name>
+# Usage: agent-worktree.sh <prefix> <rig-root> <target-dir> <name>
 #
-# Ensures <target-dir> is a git worktree of <rig-root> on branch
-# gc-chat-<name>, so every chat session works in its own checkout:
+# <prefix> is one lowercase word (^[a-z][a-z0-9]*$). The pack uses two:
+#
+#   - chat: the pack's chat agent. Each session gets its own worktree,
+#     <rig-root>/worktrees/chat-<name> on branch gc-chat-<name>.
+#   - agent: a named agent opted in by a rig patch through
+#     `gc <binding> ensure`. It keeps one stable worktree across restarts,
+#     <rig-root>/worktrees/agent-<name> on branch gc-agent-<name>.
+#
+# Ensures <target-dir>, which must be named <prefix>-<name>, is a git
+# worktree of <rig-root> on branch gc-<prefix>-<name>:
 #
 #   - An existing worktree of this rig is reused as is.
-#   - A leftover gc-chat-<name> branch is resumed as is.
+#   - A leftover gc-<prefix>-<name> branch is resumed as is.
 #   - A new branch is cut from origin/HEAD, else origin/main, else the rig's
-#     local HEAD, after a fetch bounded by CHAT_WORKTREE_FETCH_TIMEOUT
+#     local HEAD, after a fetch bounded by AGENT_WORKTREE_FETCH_TIMEOUT
 #     seconds (default 5, clamped to 1..8).
 #   - gc writes provider hook and overlay files (such as .gc/settings.json)
 #     into the work_dir before pre_start runs. A directory holding only
@@ -17,8 +25,10 @@
 #     then put back wherever the checkout has no file of its own.
 #   - Any other non-empty directory that is not a worktree of this rig is
 #     refused.
+#   - A rig root that is itself a linked worktree is refused before anything
+#     is written: the new worktree would nest inside it.
 #   - /worktrees/ and /.gc/ are kept in the rig's local info/exclude, so the
-#     rig checkout's status and each chat worktree's status stay clean.
+#     rig checkout's status and each agent worktree's status stay clean.
 #
 # Deliberately absent, compared with gastown's worktree-setup.sh:
 #   - no --sync: an existing worktree or branch is never pulled, rebased,
@@ -28,23 +38,33 @@
 #     set aside, so a foreign directory is still refused untouched.
 # The script never deletes a worktree or a branch; see the pack README.
 #
-# Every failure prints one stderr line prefixed "worktree-chat:" and exits 1.
+# Every failure prints one stderr line prefixed "agent-worktree:" and exits 1.
 
 set -eu
 
 die() {
-    printf 'worktree-chat: %s\n' "$*" >&2
+    printf 'agent-worktree: %s\n' "$*" >&2
     exit 1
 }
 
-if [ "$#" -ne 3 ] || [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
-    die "usage: worktree-chat.sh <rig-root> <target-dir> <name>"
+if [ "$#" -ne 4 ] || [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
+    die "usage: agent-worktree.sh <prefix> <rig-root> <target-dir> <name>"
 fi
 
-RIG_ROOT=$1
-WT=$2
-NAME=$3
-BRANCH="gc-chat-$NAME"
+PREFIX=$1
+RIG_ROOT=$2
+WT=$3
+NAME=$4
+
+# One lowercase word, so <prefix>-<name> always splits unambiguously. The
+# letters are spelled out because a range like [a-z] follows the locale.
+case $PREFIX in
+    [!abcdefghijklmnopqrstuvwxyz]* | *[!abcdefghijklmnopqrstuvwxyz0123456789]*)
+        die "invalid prefix $PREFIX: it must match ^[a-z][a-z0-9]*\$"
+        ;;
+esac
+
+BRANCH="gc-$PREFIX-$NAME"
 
 # Never let a credential prompt block session start.
 GIT_TERMINAL_PROMPT=0
@@ -58,13 +78,23 @@ if [ "$(git -C "$RIG_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" != "tru
     die "$RIG_ROOT is not a git work tree"
 fi
 
+# A rig root inside a linked worktree has a git dir apart from the common
+# one. A worktree added under it would nest inside that worktree, so refuse
+# before anything, even info/exclude, is written.
+RIG_GIT_DIR=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-dir 2>/dev/null) &&
+    RIG_GIT_DIR_REAL=$(CDPATH= cd -- "$RIG_GIT_DIR" 2>/dev/null && pwd -P) ||
+    die "cannot resolve the git dir of $RIG_ROOT"
+RIG_COMMON_DIR=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+    RIG_COMMON_REAL=$(CDPATH= cd -- "$RIG_COMMON_DIR" 2>/dev/null && pwd -P) ||
+    die "cannot resolve the git common dir of $RIG_ROOT"
+[ "$RIG_GIT_DIR_REAL" = "$RIG_COMMON_REAL" ] ||
+    die "refusing $RIG_ROOT: it is a linked worktree, so $WT would nest inside it (see the agent-worktree README, Do not opt in)"
+
 # The work_dir and the name are rendered separately by gc. If they ever
 # disagree, every session could derive the same branch, so fail loudly.
-if [ "$(basename "$WT")" != "chat-$NAME" ]; then
-    die "$WT does not match name $NAME"
-fi
+[ "$(basename "$WT")" = "$PREFIX-$NAME" ] || die "$WT does not match name $NAME (prefix $PREFIX)"
 
-FETCH_TIMEOUT=${CHAT_WORKTREE_FETCH_TIMEOUT:-5}
+FETCH_TIMEOUT=${AGENT_WORKTREE_FETCH_TIMEOUT:-5}
 case $FETCH_TIMEOUT in
     '' | *[!0-9]*) FETCH_TIMEOUT=5 ;;
 esac
@@ -138,7 +168,7 @@ RIG_COMMON=$(git_common_dir "$RIG_ROOT") ||
     die "cannot resolve the git common dir of $RIG_ROOT"
 EXCLUDE="$RIG_COMMON/info/exclude"
 # /.gc/ is gc's runtime state, including the settings it writes into every
-# chat worktree; excluding it keeps a session from committing it.
+# agent worktree; excluding it keeps a session from committing it.
 exclude_has_all() {
     grep -qxF /worktrees/ "$1" 2>/dev/null && grep -qxF /.gc/ "$1" 2>/dev/null
 }
@@ -147,7 +177,7 @@ exclude_has_all() {
 # copy is checked and extended from one snapshot, and every writer adds the
 # same lines, so concurrent writers converge on one copy of each.
 if ! exclude_has_all "$EXCLUDE"; then
-    EXCLUDE_TMP="$EXCLUDE.chat-worktree.$$"
+    EXCLUDE_TMP="$EXCLUDE.agent-worktree.$$"
     {
         mkdir -p "$RIG_COMMON/info" &&
             if [ -s "$EXCLUDE" ]; then cat "$EXCLUDE" >"$EXCLUDE_TMP"; else : >"$EXCLUDE_TMP"; fi &&
@@ -173,7 +203,7 @@ if [ -e "$WT/.git" ]; then
     # saying "initializing" means an earlier add was killed half way. Refuse
     # rather than repair it by checkout or reset.
     if [ -f "$WT_GIT_DIR/locked" ] && grep -q initializing "$WT_GIT_DIR/locked"; then
-        die "$WT is a partially created worktree; remove it by hand (see the chat-worktree README, Cleanup)"
+        die "$WT is a partially created worktree; remove it by hand (see the agent-worktree README, Cleanup)"
     fi
     exit 0
 fi
@@ -232,7 +262,7 @@ if [ -d "$WT" ]; then
             die "refusing $WT: exists, is not empty, and is not a git worktree"
     done
     if [ -n "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
-        STAGE=$(mktemp -d "$(dirname "$WT")/.chat-worktree-stage.XXXXXX" 2>/dev/null) ||
+        STAGE=$(mktemp -d "$(dirname "$WT")/.agent-worktree-stage.XXXXXX" 2>/dev/null) ||
             die "cannot set aside gc's files in $WT"
         trap 'restore_stage' EXIT
         trap 'restore_stage; exit 1' HUP INT TERM

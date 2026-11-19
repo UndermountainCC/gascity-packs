@@ -1,11 +1,12 @@
 # One chat session per conversation, each in its own git worktree of the rig.
-# See ../../README.md. Model: gastown's polecat, without --sync or .beads/redirect.
+# The pack's chat example of agent-worktree.sh in chat mode; see ../../README.md.
+# Model: gastown's polecat, without --sync or .beads/redirect.
 # No provider: the agent inherits the city or rig default.
 description = "Interactive chat session in its own git worktree of the rig"
 scope = "rig"
 wake_mode = "fresh"
 work_dir = "{{.RigRoot}}/worktrees/chat-{{.AgentBase}}"
-pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-chat.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
+pre_start = ["{{.ConfigDir}}/assets/scripts/agent-worktree.sh chat {{.RigRoot}} {{.WorkDir}} {{.AgentBase}}"]
 min_active_sessions = 0
 max_active_sessions = 8
 idle_timeout = "4h"
