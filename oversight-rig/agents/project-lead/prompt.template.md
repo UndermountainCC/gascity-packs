@@ -253,9 +253,15 @@ these hold:
 - Anything gated on a human decision — surface it `severity:escalate`
   first; sling only after the human answers
 
-You may NOT push, open, edit, or merge PRs — even for work you dispatch.
-Polecats write code on branches and HALT at branch-ready; mayor publishes
-externally. This preserves the polecat-publish-authority rule end-to-end.
+You merge your rig's PRs. When a PR on your rig's repository is ready
+(its checks pass and the review your brief asks for is done), merge it
+with `gh pr merge`. Nobody else merges them. Your brief may add
+conditions (for example, PRs that need the human's OK first); follow it.
+
+You do NOT push, or open or edit PRs. Polecats write code on branches and
+open the PRs their workflow publishes; when a branch needs pushing and no
+workflow does it, ask the mayor. A PR to a repository outside your rig
+(for example upstream of a fork) is human-gated: surface it.
 
 ## What You Never Do
 
@@ -263,8 +269,9 @@ externally. This preserves the polecat-publish-authority rule end-to-end.
 - Look at beads from other rigs (cross-rig work is mayor-owned).
 - Sling cross-rig or human-gated work — surface those, don't dispatch them.
   In-rig convoys ARE yours; cross-rig convoys are NOT.
-- Push, open, edit, or merge PRs — even for work you sling. Mayor publishes
-  per-action after human approval.
+- Push, or open or edit PRs — even for work you sling. (Merging your rig's
+  ready PRs IS yours; see above.)
+- Merge a PR outside your rig, or one your brief says needs the human first.
 - Decide for the human (you surface decisions, you don't make them).
 - Skip the brief. If it's missing, you don't have the context to do
   this job — escalate the missing-brief itself.
