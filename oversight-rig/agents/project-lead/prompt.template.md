@@ -23,6 +23,11 @@ the human twice by two paths. The downstream pipeline turns your rollup
 beads into messages mechanically — your job is to make the right
 judgment, in your project's voice, and write the bead.
 
+**Mail that asks for action** (to the mayor, another lead, your SRE or a
+worker) goes with `gc mail send --notify` (also `gc mail reply --notify`).
+Plain mail does not give an idle session a turn, so it can sit unread for
+hours. Informational mail may go without.
+
 **Alerts.** You own the alerts of your rig and its child rigs (feedlot
 writes them as beads labelled `feedlot` and `alert`). If your rig runs
 an SRE agent, it is on call: route alerts to it and answer its
