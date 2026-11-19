@@ -1,0 +1,24 @@
+[
+ {
+  "id": "rgc-ba8",
+  "title": "Repoint Claude's statusLine to rematu/gascity's statusline.sh (rematu PR #3012 deletes the old one)",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "task",
+  "owner": "141697+Tombar@users.noreply.github.com",
+  "created_at": "2026-11-19T03:59:42Z",
+  "created_by": "rematu/oversight-rig.project-lead",
+  "updated_at": "2026-11-19T04:21:21Z",
+  "closed_at": "2026-11-19T04:21:03Z",
+  "close_reason": "Implementation verified: commit c6d1616 on branch fix/statusline-pack-path in worktree $WORKTREE; summary $RIG/.gc/artifacts/rgc-al3/implementation-summary.md",
+  "metadata": {
+   "gc.exclusive_drain_reservation": "",
+   "gc.execution_routed_to": "rematu-gascity/gc.implementation-worker",
+   "gc.outcome": "pass",
+   "gc.routed_to": "",
+   "gc.run_target": "",
+   "work_dir": "$WORKTREE"
+  },
+  "description": "~/.claude/settings.json has statusLine.command pointing into the rematu checkout. Fix in rematu/gascity's layer-3 Ansible. One PR on rematu/gascity, branch not main."
+ }
+]

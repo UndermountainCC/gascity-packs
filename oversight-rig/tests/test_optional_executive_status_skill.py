@@ -38,6 +38,7 @@ def test_executive_status_examples_are_not_active_pack_orders() -> None:
     active_orders = {path.name for path in (PACK_ROOT / "orders").glob("*.toml")}
 
     assert active_orders == {
+        "dispatched-close-watch.toml",
         "escalate-rollups.toml",
         "patrol-project-leads.toml",
     }
