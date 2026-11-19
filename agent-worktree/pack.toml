@@ -1,13 +1,20 @@
-# Chat worktree — one git worktree per interactive chat session.
+# Agent worktree — opt any agent of a rig into its own stable git worktree.
 #
-# Adds a single rig-scoped agent, `chat`. Every session of it opens in its own
-# git worktree of the rig, <rig>/worktrees/chat-<name>, on branch
-# gc-chat-<name>, so concurrent conversations never share the rig checkout.
+# Every opted-in session opens in its own git worktree of the rig, under
+# <rig>/worktrees/, on its own gc-* branch, so it never shares the rig
+# checkout. The pack has two uses, through two independent imports:
 #
-# Import it at rig scope (rigs[].pack). Sessions are opened on demand; the pack
-# declares no services and no named sessions. See README.md.
+# - City import ([imports.<binding>]): provides the `gc <binding> ensure`
+#   command and the opt-in patches for named agents. A city import is
+#   required for this, because rig imports expose no pack commands. Set
+#   agents_exclude = ["chat"] unless you also want `chat` in every rig.
+# - Rig import ([rigs.imports.<binding>]): adds the rig-scoped `chat` agent,
+#   whose every session opens in its own worktree, chat-<name>.
+#
+# Sessions are opened on demand; the pack declares no services and no named
+# sessions. See README.md.
 
 [pack]
-name = "chat-worktree"
+name = "agent-worktree"
 schema = 2
-description = "Rig-scoped chat agent whose sessions each open in their own git worktree"
+description = "Opt any agent of a rig into its own stable git worktree; includes a per-session chat agent"
