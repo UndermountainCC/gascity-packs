@@ -150,6 +150,11 @@ Browse the tree for the current set; each pack has its own README.
 - [cass](./cass) adds a shared `cass-search` prompt fragment and Claude skill
   overlay for searching past coding-agent sessions.
 
+### Session packs
+
+- [chat-worktree](./chat-worktree) gives each rig chat session its own git
+  worktree and `gc-chat-<name>` branch.
+
 ### Oversight packs
 
 - [oversight-rig](./oversight-rig) adds one rig-scoped project lead per rig and
