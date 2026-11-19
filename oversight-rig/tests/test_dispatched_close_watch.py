@@ -251,6 +251,57 @@ class TestWhoIsTold(Base):
         self.assertEqual(self.delivered(), [])  # rgc-ba8 was created by rematu's lead, not other/lead
 
 
+class TestLeadAddress(Base):
+    """A rig whose lead is another agent, renamed from feedlot-lead to feedlot/feedlot-lead."""
+    NEW, OLD = "feedlot/feedlot-lead", "feedlot-lead"
+
+    def test_gc_oversight_lead_is_told(self):
+        self.edit("bead-rgc-ba8.json", lambda b: b[0].update({"created_by": self.NEW}))
+        rc, out, _ = self.run_watch(GC_OVERSIGHT_LEAD=self.NEW)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["to"], self.NEW)
+        self.assertEqual([m["to"] for m in self.delivered()], [self.NEW])
+
+    def test_gc_oversight_lead_replaces_the_project_lead(self):
+        rc, out, _ = self.run_watch(GC_OVERSIGHT_LEAD=self.NEW)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.delivered(), [], "rgc-ba8 was created by the project-lead, not the lead")
+
+    def test_to_wins_over_gc_oversight_lead(self):
+        rc, out, _ = self.run_watch("--to", LEAD, GC_OVERSIGHT_LEAD=self.NEW)
+        self.assertEqual(out["to"], LEAD)
+        self.assertEqual([m["to"] for m in self.delivered()], [LEAD])
+
+    def test_a_bead_created_under_an_old_address_is_mailed_to_the_new_one(self):
+        self.edit("bead-rgc-ba8.json", lambda b: b[0].update({"created_by": self.OLD}))
+        self.run_watch(GC_OVERSIGHT_LEAD=self.NEW)
+        self.assertEqual(self.delivered(), [], "not the lead without the alias")
+        rc, out, _ = self.run_watch(GC_OVERSIGHT_LEAD=self.NEW, GC_OVERSIGHT_LEAD_ALIASES=" x, " + self.OLD)
+        self.assertEqual(rc, 0)
+        self.assertEqual([m["to"] for m in self.delivered()], [self.NEW])
+
+    def test_lead_aliases_flag(self):
+        self.edit("bead-rgc-ba8.json", lambda b: b[0].update({"created_by": self.OLD}))
+        self.run_watch("--lead-aliases", self.OLD, GC_OVERSIGHT_LEAD=self.NEW)
+        self.assertEqual([m["to"] for m in self.delivered()], [self.NEW])
+
+    def test_a_close_under_an_alias_is_not_mailed_back(self):
+        self.events(event("gr-old1", actor=self.OLD))
+        self.bead("gr-old1", created_by=self.NEW)
+        self.run_watch(GC_OVERSIGHT_LEAD=self.NEW, GC_OVERSIGHT_LEAD_ALIASES=self.OLD)
+        self.assertEqual(self.delivered(), [])
+
+    def test_sessions_of_an_alias_template_count_as_the_lead(self):
+        self.edit("sessions.json", lambda d: d["sessions"].append(
+            {"id": "pi-wisp-old", "template": self.OLD, "state": "active"}))
+        self.events(event("gr-old2", actor="pi-wisp-old"), event("gr-old3"))
+        self.bead("gr-old2", created_by=self.NEW)
+        self.bead("gr-old3", created_by="pi-wisp-old")
+        self.run_watch(GC_OVERSIGHT_LEAD=self.NEW, GC_OVERSIGHT_LEAD_ALIASES=self.OLD)
+        self.assertEqual([subject(m).split()[3] for m in self.delivered()], ["gr-old3"],
+                         "gr-old2 was closed by the lead's old session; gr-old3 was created by it")
+
+
 class TestFailsLoud(Base):
     def test_unreadable_events_exit_2(self):
         open(os.path.join(self.dir, "FAIL-events"), "w").close()

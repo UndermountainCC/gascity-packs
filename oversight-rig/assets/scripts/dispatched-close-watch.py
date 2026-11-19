@@ -21,10 +21,14 @@ that cannot see must not look green. With no rig at all (the city-level instance
 there is no lead to tell: it prints a skip line and exits 0.
 
 Environment (all optional):
-  GC_RIG                   importing rig; its lead is told (or --to)
-  GC_OVERSIGHT_CHILD_RIGS  extra rigs whose closes are watched (or --child-rigs)
-  GC_BIN                   gc executable (default `gc`)
-  GC_PACK_STATE_DIR        where handled closes are kept between runs
+  GC_RIG                     importing rig; its lead is told (or --to)
+  GC_OVERSIGHT_CHILD_RIGS    extra rigs whose closes are watched (or --child-rigs)
+  GC_OVERSIGHT_LEAD          the lead's address, when it is not <rig>/oversight-rig.project-lead
+                             (--to wins)
+  GC_OVERSIGHT_LEAD_ALIASES  other names the lead created or closed beads under, comma-separated,
+                             e.g. its address before a rename (or --lead-aliases)
+  GC_BIN                     gc executable (default `gc`)
+  GC_PACK_STATE_DIR          where handled closes are kept between runs
 """
 import argparse
 import json
@@ -109,13 +113,15 @@ def closed_events(gc, since):
     return events
 
 
-def lead_identities(gc, to):
-    """Every name the lead creates and closes beads under: its address, session ids and aliases."""
-    ids = {to}
+def lead_identities(gc, to, aliases=()):
+    """Every name the lead creates and closes beads under: its address, the configured aliases and
+    the session ids, names and aliases of sessions whose template is one of those."""
+    names = {to, *aliases}
+    ids = set(names)
     try:
         data = load_json(run([gc, "session", "list", "--json"], "gc session list"), "gc session list")
         for s in data.get("sessions", []):
-            if s.get("template") == to:
+            if s.get("template") in names:
                 ids.update(v for v in (s.get("id"), s.get("name"), s.get("alias")) if v)
     except (Unavailable, AttributeError):
         pass  # cannot list sessions: match on the address alone and tell the lead anyway
@@ -194,7 +200,12 @@ def main(argv=None):
                     help="comma-separated rigs whose closes are watched (default: $GC_RIG)")
     ap.add_argument("--child-rigs", default=os.environ.get("GC_OVERSIGHT_CHILD_RIGS"),
                     help="comma-separated extra rigs to watch (default: $GC_OVERSIGHT_CHILD_RIGS)")
-    ap.add_argument("--to", help="the lead (default: <$GC_RIG or first rig>/oversight-rig.project-lead)")
+    ap.add_argument("--to", default=os.environ.get("GC_OVERSIGHT_LEAD"),
+                    help="the lead (default: $GC_OVERSIGHT_LEAD, else"
+                         " <$GC_RIG or first rig>/oversight-rig.project-lead)")
+    ap.add_argument("--lead-aliases", default=os.environ.get("GC_OVERSIGHT_LEAD_ALIASES"),
+                    help="comma-separated other names of the lead, for created_by and closer matching"
+                         " (default: $GC_OVERSIGHT_LEAD_ALIASES)")
     ap.add_argument("--since", default="10m", help="event lookback; must exceed the controller tick")
     ap.add_argument("--dry-run", action="store_true", help="detect and print, send no mail")
     a = ap.parse_args(argv)
@@ -228,7 +239,7 @@ def main(argv=None):
             errors.append(f"{bead_id}: {e}")
             continue
         if lead is None:
-            lead = lead_identities(gc, to)
+            lead = lead_identities(gc, to, split(a.lead_aliases))
         if not bead or bead.get("created_by") not in lead or bead.get("status") != "closed" or noise(bead):
             continue
         key = f"dispatched-close:{bead_id}:{bead.get('closed_at') or ev['bead'].get('updated_at') or ''}"
